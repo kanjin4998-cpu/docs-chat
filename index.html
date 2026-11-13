@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docs Chat</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--text:#1c1e21;--muted:#6b7280;--accent:#4f46e5;--line:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#111318;--panel:#1a1d24;--text:#e8e9ec;--muted:#9aa0ab;--accent:#818cf8;--line:#2a2e38}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex}
+aside{width:280px;background:var(--panel);border-right:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+h1{font-size:17px;margin:0}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:22px 10px;text-align:center;color:var(--muted);cursor:pointer}
+#drop.over{border-color:var(--accent);color:var(--accent)}
+.doc{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:6px;background:var(--bg);font-size:13px}
+.doc button{border:0;background:none;color:var(--muted);cursor:pointer}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+#log{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:780px;padding:10px 14px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
+.user{align-self:flex-end;background:var(--accent);color:#fff}
+.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.bot img,.user img{max-width:240px;border-radius:8px;display:block;margin-top:6px}
+details{color:var(--muted);font-size:13px;margin-bottom:6px}
+.src{font-size:12px;color:var(--muted);margin-top:8px}
+form{display:flex;gap:8px;padding:14px;border-top:1px solid var(--line);background:var(--panel);align-items:center}
+input[type=text]{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:inherit}
+button.send{padding:10px 18px;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer;font:inherit}
+label.t{font-size:13px;color:var(--muted);white-space:nowrap}
+#attach{cursor:pointer;font-size:18px}
+#prev{height:36px;border-radius:6px;display:none}
+</style></head><body>
+<aside>
+  <h1>📚 Docs Chat</h1>
+  <div id="drop">Drop PDF, PPTX or images here<br>or click to choose</div>
+  <input id="file" type="file" multiple hidden accept=".pdf,.pptx,.png,.jpg,.jpeg,.webp,.txt,.md">
+  <div id="status" style="font-size:13px;color:var(--muted)"></div>
+  <div id="docs"></div>
+</aside>
+<main>
+  <div id="log"><div class="msg bot">Upload some files on the left, then ask me anything about them. You can also attach a picture to a question with 📎.</div></div>
+  <form id="f">
+    <span id="attach" title="Attach an image">📎</span><input id="imgfile" type="file" accept="image/*" hidden>
+    <img id="prev">
+    <input type="text" id="q" placeholder="Ask a question…" autocomplete="off">
+    <label class="t"><input type="checkbox" id="think" checked> Think</label>
+    <button class="send">Send</button>
+  </form>
+</main>
+<script>
+const $=s=>document.querySelector(s);let history=[],imgB64=null,imgURL=null;
+async function loadDocs(){const d=await (await fetch('/api/docs')).json();
+ $('#docs').innerHTML=d.map(x=>`<div class="doc"><span>${x.kind==='pdf'?'📄':x.kind==='pptx'?'📊':x.kind==='image'?'🖼️':'📝'} ${x.name}</span><button onclick="del('${x.id}')">✕</button></div>`).join('')||'<div style="color:var(--muted);font-size:13px">No documents yet</div>'}
+async function del(id){await fetch('/api/docs/'+id,{method:'DELETE'});loadDocs()}
+async function upload(files){if(!files.length)return;$('#status').textContent='Reading '+files.length+' file(s)… (images/scans take longer)';
+ const fd=new FormData();[...files].forEach(f=>fd.append('files',f));
+ const r=await (await fetch('/api/upload',{method:'POST',body:fd})).json();
+ $('#status').textContent=r.map(x=>x.ok?`✓ ${x.name}`:`✗ ${x.name}: ${x.error}`).join('\n');loadDocs()}
+const drop=$('#drop');drop.onclick=()=>$('#file').click();$('#file').onchange=e=>upload(e.target.files);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');upload(e.dataTransfer.files)};
+$('#attach').onclick=()=>$('#imgfile').click();
+$('#imgfile').onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+ rd.onload=()=>{imgURL=rd.result;imgB64=rd.result.split(',')[1];$('#prev').src=imgURL;$('#prev').style.display='block'};rd.readAsDataURL(f)};
+function add(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;$('#log').append(d);$('#log').scrollTop=1e9;return d}
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+$('#f').onsubmit=async e=>{e.preventDefault();const q=$('#q').value.trim();if(!q)return;$('#q').value='';
+ add('user',esc(q)+(imgURL?`<img src="${imgURL}">`:''));
+ const bot=add('bot','<details open style="display:none"><summary>Thinking…</summary><span class="th"></span></details><span class="ans">…</span><div class="src"></div>');
+ const th=bot.querySelector('.th'),det=bot.querySelector('details'),ans=bot.querySelector('.ans');let a='',t='';
+ const body={question:q,history,think:$('#think').checked,image:imgB64};imgB64=null;imgURL=null;$('#prev').style.display='none';$('#imgfile').value='';
+ const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+ while(true){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop();
+  for(const l of lines){if(!l)continue;const m=JSON.parse(l);
+   if(m.sources){const s=[...new Set(m.sources.map(x=>x.doc+' — '+x.where))];bot.querySelector('.src').textContent=s.length?'Sources: '+s.join(' · '):''}
+   if(m.thinking){t+=m.thinking;det.style.display='block';th.textContent=t}
+   if(m.content){if(!a)det.open=false;a+=m.content;ans.textContent=a}
+   $('#log').scrollTop=1e9}}
+ history.push({role:'user',content:q},{role:'assistant',content:a})};
+loadDocs();
+</script></body></html>
